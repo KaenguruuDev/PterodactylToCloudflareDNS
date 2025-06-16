@@ -3,13 +3,12 @@ using Newtonsoft.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using PterodactylToCloudflareDNS.PterodactylApiJson;
 
 namespace PterodactylToCloudflareDNS;
 
 public static partial class PterodactylService
 {
-	private static readonly HttpClient HttpClient = new();
-
 	private static string? _apiKey;
 	private static string? _apiUrl;
 	private static readonly List<Server> Servers = [];

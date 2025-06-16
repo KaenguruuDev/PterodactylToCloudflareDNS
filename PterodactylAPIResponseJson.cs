@@ -1,6 +1,6 @@
 using Newtonsoft.Json;
 
-namespace PterodactylToCloudflareDNS;
+namespace PterodactylToCloudflareDNS.PterodactylApiJson;
 
 public class RootObject
 {

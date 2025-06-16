@@ -7,7 +7,8 @@ public static class Api
 	private enum RequestMode
 	{
 		Get,
-		Post
+		Post,
+		Put,
 	}
 
 	private static readonly HttpClient Client = new();
@@ -26,6 +27,12 @@ public static class Api
 		return await MakeRequest(RequestMode.Post, url, apiKey, json, throwOnFailure);
 	}
 
+	public static async Task<HttpResponseMessage?> Put(string url, StringContent json, string? apiKey = null,
+		bool throwOnFailure = false)
+	{
+		return await MakeRequest(RequestMode.Put, url, apiKey, json, throwOnFailure);
+	}
+
 	private static async Task<HttpResponseMessage?> MakeRequest(RequestMode mode, string url, string? apiKey = null,
 		StringContent? json = null, bool throwOnFailure = false)
 	{
@@ -38,6 +45,7 @@ public static class Api
 		{
 			RequestMode.Get => "GET",
 			RequestMode.Post => "POST",
+			RequestMode.Put => "PUT",
 			_ => "UNKNOWN"
 		};
 
@@ -48,6 +56,7 @@ public static class Api
 			{
 				RequestMode.Get => await Client.GetAsync(url, token),
 				RequestMode.Post => await Client.PostAsync(url, json, token),
+				RequestMode.Put => await Client.PutAsync(url, json, token),
 				_ => null
 			};
 
