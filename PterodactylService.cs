@@ -76,6 +76,9 @@ public static partial class PterodactylService
 				var validDnsConfig = DnsConfigValidatorRegex().IsMatch(description);
 				var match = DnsConfigParseRegex().Match(description);
 
+				await Logging.Log(LogSeverity.Info, "Pterodactyl",
+					$"Parsing: {description.Split("\n").FirstOrDefault(l => l.Contains("DNS_CONFIG"))}");
+
 				if (!validDnsConfig || !match.Success || match.Groups.Count != 5)
 				{
 					await Logging.Log(LogSeverity.Warning, "Pterodactyl",
