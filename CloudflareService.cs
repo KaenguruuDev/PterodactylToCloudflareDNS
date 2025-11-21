@@ -34,6 +34,8 @@ public static class CloudflareService
 		catch (Exception ex)
 		{
 			await Logging.Log(LogSeverity.Error, "Cloudflare", $"Client creation failed: {ex.Message}");
+			Environment.Exit(1);
+			return;
 		}
 
 		await Logging.Log(LogSeverity.Info, "Cloudflare", "Initialize");
@@ -42,6 +44,7 @@ public static class CloudflareService
 		{
 			await Logging.Log(LogSeverity.Error, "Cloudflare",
 				"Could not verify Cloudflare configuration. Terminating.");
+			Environment.Exit(1);
 			return;
 		}
 
@@ -79,7 +82,7 @@ public static class CloudflareService
 
 	private static async Task MonitorForChanges()
 	{
-		while (_cloudFlareClient != null)
+		while (true)
 		{
 			await Logging.Log(LogSeverity.Debug, "CF/Monitor", $"Starting DNS refresh...");
 
@@ -147,8 +150,6 @@ public static class CloudflareService
 			await Logging.Log(LogSeverity.Debug, "CF/Monitor", $"Finished DNS refresh...");
 			await Task.Delay(TimeSpan.FromSeconds(30));
 		}
-
-		await Logging.Log(LogSeverity.Error, "CF/Monitor", "CloudFlareClient is null. Terminating.");
 	}
 
 	private static async Task CreateServerRecords(Server server)

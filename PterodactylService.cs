@@ -24,6 +24,7 @@ public static partial class PterodactylService
 		if (!success)
 		{
 			await Logging.Log(LogSeverity.Error, "Pterodactyl", "Could not pull data from API. Terminating...");
+			Environment.Exit(1);
 			return;
 		}
 
@@ -83,7 +84,7 @@ public static partial class PterodactylService
 				{
 					await Logging.Log(LogSeverity.Warning, "Pterodactyl",
 						$"DNS_CONFIG: {(validDnsConfig ? match.Groups[0].Value : description)} could not be parsed.");
-					return;
+					continue;
 				}
 
 				var ipAddress = match.Groups[1].Value.Replace(" ", "");
