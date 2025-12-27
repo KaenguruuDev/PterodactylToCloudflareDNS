@@ -124,6 +124,6 @@ public static partial class PterodactylService
 	[GeneratedRegex(@"(DNS_CONFIG\(.+\))")]
 	private static partial Regex DnsConfigValidatorRegex();
 
-	[GeneratedRegex(@"DNS_CONFIG\(((?:[0-9]{3}\.?)+), ?([0-9]{4,}), ?([^,]+),(.+)\)")]
+	[GeneratedRegex(@"DNS_CONFIG\(((?:[0-9]{1,3}\.?)+), ?([0-9]{4,}), ?([^,]+),(.+)\)")]
 	private static partial Regex DnsConfigParseRegex();
 }
