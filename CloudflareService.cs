@@ -239,11 +239,11 @@ public static class CloudflareService
 			foreach (var server in newServerList.Data)
 			{
 				var serverResponse = await Api.Get(
-					$"{_panelUrl}/api/client/extensions/dnssubdomains/servers/{server.Attributes.Uuid}/dns-config",
+					$"{_panelUrl}/api/client/extensions/dnssubdomains/servers/{server.Attributes.Identifier}/dns-config",
 					_pterodactylClientApiKey);
 				if (serverResponse is null || !serverResponse.IsSuccessStatusCode)
 				{
-					await Logging.LogDebug("CF/Monitor", "Could not reach server '{server.Attributes.Uuid}'");
+					await Logging.LogDebug("CF/Monitor", $"Could not reach server '{server.Attributes.Uuid}': {serverResponse?.RequestMessage}");
 					continue;
 				}
 
