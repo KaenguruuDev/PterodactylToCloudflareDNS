@@ -151,9 +151,7 @@ public static class CloudflareService
 			await Logging.LogDebug("CF/Monitor", "Deleting unused records...");
 
 			foreach (var record in unusedRecords)
-			{
-				//await _cloudFlareClient.Zones.DnsRecords.DeleteAsync(_zoneId, record.Id);	
-			}
+				await _cloudFlareClient.Zones.DnsRecords.DeleteAsync(_zoneId, record.Id);	
 
 			await Logging.LogDebug("CF/Monitor", $"Finished DNS refresh...");
 			await Task.Delay(TimeSpan.FromSeconds(30));
