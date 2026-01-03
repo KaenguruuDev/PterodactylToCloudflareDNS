@@ -2,85 +2,69 @@ using Newtonsoft.Json;
 
 namespace PterodactylToCloudflareDNS.PterodactylApiJson;
 
-public class RootObject
+// Example success single server: {"success":true,"data":{"server_uuid":"c404670d-1e35-43dc-902e-9e42bf155ffc","server_name":"test","enabled":true,"ip":"127.0.0.1","port":2000,"subdomain":"test","domain":"kaenguruu.dev","full_domain":"test.kaenguruu.dev","updated_at":"2026-01-03 02:52:36"}}
+public class SingleServerQueryResponse
 {
-    [JsonProperty("object")]
-    public string? Object { get; set; }
-    public List<ServerData>? Data { get; set; }
-    public Meta? Meta { get; set; }
+	[JsonProperty("success")]
+	public bool Success { get; set; }
+
+	[JsonProperty("data")]
+	public ServerData? Data { get; set; }
 }
 
 public class ServerData
 {
-    [JsonProperty("object")]
-    public string? Object { get; set; }
-    public Attributes? Attributes { get; set; }
+	[JsonProperty("server_uuid")]
+	public string ServerUuid { get; set; } = string.Empty;
+
+	[JsonProperty("server_name")]
+	public string ServerName { get; set; } = string.Empty;
+
+	[JsonProperty("enabled")]
+	public bool Enabled { get; set; }
+
+	[JsonProperty("ip")]
+	public string Ip { get; set; } = string.Empty;
+
+	[JsonProperty("port")]
+	public int Port { get; set; }
+
+	[JsonProperty("subdomain")]
+	public string Subdomain { get; set; } = string.Empty;
+
+	[JsonProperty("domain")]
+	public string Domain { get; set; } = string.Empty;
+
+	[JsonProperty("full_domain")]
+	public string FullDomain { get; set; } = string.Empty;
+
+	[JsonProperty("updated_at")]
+	public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.MinValue;
 }
 
-public class Attributes
+public class MultiServerQueryResponse
 {
-    public int Id { get; set; }
-    public string? ExternalId { get; set; }
-    public string? Uuid { get; set; }
-    public string? Identifier { get; set; }
-    public string? Name { get; set; }
-    public string? Description { get; set; }
-    public object? Status { get; set; }
-    public bool Suspended { get; set; }
-    public Limits? Limits { get; set; }
-    public FeatureLimits? FeatureLimits { get; set; }
-    public int User { get; set; }
-    public int Node { get; set; }
-    public int Allocation { get; set; }
-    public int Nest { get; set; }
-    public int Egg { get; set; }
-    public Container? Container { get; set; }
-    public string? UpdatedAt { get; set; }
-    public string? CreatedAt { get; set; }
+	[JsonProperty("object")]
+	public string Object { get; set; } = string.Empty;
+
+	[JsonProperty("data")]
+	public MultiServerData[] Data { get; set; } = Array.Empty<MultiServerData>();
 }
 
-public class Limits
+public class MultiServerData
 {
-    public int Memory { get; set; }
-    public int Swap { get; set; }
-    public int Disk { get; set; }
-    public int Io { get; set; }
-    public int Cpu { get; set; }
-    public object? Threads { get; set; }
-    public bool OomDisabled { get; set; }
+	[JsonProperty("object")]
+	public string Object { get; set; } = string.Empty;
+
+	[JsonProperty("attributes")]
+	public MultiServerAttributes Attributes { get; set; } = new MultiServerAttributes();
 }
 
-public class FeatureLimits
+public class MultiServerAttributes
 {
-    public int Databases { get; set; }
-    public int Allocations { get; set; }
-    public int Backups { get; set; }
-}
+	[JsonProperty("uuid")]
+	public string Uuid { get; set; } = string.Empty;
 
-public class Container
-{
-    public string? StartupCommand { get; set; }
-    public string? Image { get; set; }
-    public int Installed { get; set; }
-    public Dictionary<string, string>? Environment { get; set; }
-}
-
-public class Meta
-{
-    public Pagination? Pagination { get; set; }
-}
-
-public class Pagination
-{
-    public int Total { get; set; }
-    public int Count { get; set; }
-    public int PerPage { get; set; }
-    public int CurrentPage { get; set; }
-    public int TotalPages { get; set; }
-    public Links? Links { get; set; }
-}
-
-public class Links
-{
-    //! I DON'T CARE
+	[JsonProperty("identifier")]
+	public string Identifier { get; set; } = string.Empty;
 }

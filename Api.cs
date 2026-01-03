@@ -70,19 +70,19 @@ public static class Api
 		}
 		catch (OperationCanceledException) when (!token.IsCancellationRequested)
 		{
-			await Logging.Log(LogSeverity.Error, $"API/{logSuffix}", $"Request to {url} timed out.");
+			await Logging.LogError($"API/{logSuffix}", $"Request to {url} timed out.");
 		}
 		catch (OperationCanceledException)
 		{
-			await Logging.Log(LogSeverity.Error, $"API/{logSuffix}", $"Request to {url} was cancelled manually.");
+			await Logging.LogError($"API/{logSuffix}", $"Request to {url} was cancelled manually.");
 		}
 		catch (HttpRequestException requestException)
 		{
-			await Logging.Log(LogSeverity.Debug, $"API/{logSuffix}", $"{requestException.Message}");
+			await Logging.LogError($"API/{logSuffix}", $"HTTP exception: {requestException.Message}");
 		}
 		catch (Exception ex)
 		{
-			await Logging.Log(LogSeverity.Error, $"API/{logSuffix}", $"Request to {url} failed: {ex.Message}");
+			await Logging.LogError($"API/{logSuffix}", $"Request to {url} failed: {ex.Message}");
 		}
 
 		return null;

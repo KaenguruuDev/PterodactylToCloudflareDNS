@@ -6,6 +6,7 @@ using CloudFlare.Client.Api.Result;
 using CloudFlare.Client.Api.Zones.DnsRecord;
 using CloudFlare.Client.Enumerators;
 using Microsoft.AspNetCore.Identity;
+using PterodactylToCloudflareDNS.PterodactylApiJson;
 
 namespace PterodactylToCloudflareDNS;
 
@@ -13,48 +14,50 @@ public static class CloudflareService
 {
 	private const int DnsAlreadyExists = 81058;
 
-	private static string? _cfApiKey;
+	private static string? _cloudflareApiKey;
 	private static string? _zoneId;
 	private static string? _panelUrl;
-	private static string? _mlApiKey;
+	private static string? _pterodactylClientApiKey;
+	private static string? _pterodactylApplicationApiKey;
 
 	private static CloudFlareClient? _cloudFlareClient;
 
 	public static async Task Run(Dictionary<string, string?> configuration)
 	{
-		configuration.TryGetValue("CLOUDFLAREAPIKEY", out _cfApiKey);
+		configuration.TryGetValue("CLOUDFLAREAPIKEY", out _cloudflareApiKey);
 		configuration.TryGetValue("CLOUDFLAREZONEID", out _zoneId);
 		configuration.TryGetValue("PTERODACTYLAPIURL", out _panelUrl);
-		configuration.TryGetValue("PTERODACTYLAPIKEY", out _mlApiKey);
+		configuration.TryGetValue("PTERODACTYL_CLIENT_API_KEY", out _pterodactylClientApiKey);
+		configuration.TryGetValue("PTERODACTYL_APPLICATION_API_KEY", out _pterodactylApplicationApiKey);
 
 		try
 		{
-			_cloudFlareClient = new CloudFlareClient(_cfApiKey);
+			_cloudFlareClient = new CloudFlareClient(_cloudflareApiKey);
 		}
 		catch (Exception ex)
 		{
-			await Logging.Log(LogSeverity.Error, "Cloudflare", $"Client creation failed: {ex.Message}");
+			await Logging.LogError("Cloudflare", $"Client creation failed: {ex.Message}");
 			Environment.Exit(1);
 			return;
 		}
 
-		await Logging.Log(LogSeverity.Info, "Cloudflare", "Initialize");
+		await Logging.LogInfo("Cloudflare", "Initialize");
 		var isValid = await CheckValidity();
 		if (!isValid)
 		{
-			await Logging.Log(LogSeverity.Error, "Cloudflare",
+			await Logging.LogError("Cloudflare",
 				"Could not verify Cloudflare configuration. Terminating.");
 			Environment.Exit(1);
 			return;
 		}
 
-		await Logging.Log(LogSeverity.Info, "Cloudflare", "Configuration is valid. Monitoring...");
+		await Logging.LogInfo("Cloudflare", "Configuration is valid. Monitoring...");
 		await MonitorForChanges();
 	}
 
 	private static async Task<bool> CheckValidity()
 	{
-		if (_cfApiKey == null || _zoneId == null || _cloudFlareClient == null)
+		if (_cloudflareApiKey == null || _zoneId == null || _cloudFlareClient == null)
 			return false;
 
 		var dnsRecord = new NewDnsRecord()
@@ -75,7 +78,7 @@ public static class CloudflareService
 		}
 		catch (Exception e)
 		{
-			await Logging.Log(LogSeverity.Error, "Cloudflare", "Error adding DnsRecord: " + e.Message);
+			await Logging.LogError("Cloudflare", "Error adding DnsRecord: " + e.Message);
 			return false;
 		}
 	}
@@ -84,19 +87,19 @@ public static class CloudflareService
 	{
 		while (true)
 		{
-			await Logging.Log(LogSeverity.Debug, "CF/Monitor", $"Starting DNS refresh...");
+			await Logging.LogDebug("CF/Monitor", $"Starting DNS refresh...");
 
 			var servers = await UpdateServerList();
 
 			// Pterodactyl API was unavailable. To avoid deleting all records, we return early.
-			if (servers is [{ Port: -1 }])
+			if (servers is [{ Data: null }])
 			{
-				await Logging.Log(LogSeverity.Debug, "CF/Monitor", "Refresh process cancelled. Continuing...");
+				await Logging.LogDebug("CF/Monitor", "Refresh process cancelled. Continuing...");
 				await Task.Delay(TimeSpan.FromSeconds(30));
 				continue;
 			}
 
-			var recordsRequest = await _cloudFlareClient.Zones.DnsRecords.GetAsync(_zoneId);
+			var recordsRequest = await _cloudFlareClient!.Zones.DnsRecords.GetAsync(_zoneId);
 
 			var existingRecords = recordsRequest.Result
 				.Where(record => record.Type is DnsRecordType.A or DnsRecordType.Srv)
@@ -105,23 +108,26 @@ public static class CloudflareService
 			var srvRecordData = existingRecords.Where(r => r.Type == DnsRecordType.Srv)
 				.Select(r => JsonConvert.DeserializeObject<SrvRecordData>(JsonConvert.SerializeObject(r.Data)))
 				.Where(r => r != null).ToArray();
-			
-			var newServers = servers.Where(s =>
-				existingRecords.All(r =>
-					(r.Type is DnsRecordType.A && r.Name != $"{s.Subdomain}.{s.Domain}") ||
-					r.Type == DnsRecordType.Srv)).ToArray();
+
+			var newServers = servers.Where(s => s.Data != null &&
+			                                    existingRecords.All(r =>
+				                                    (r.Type is DnsRecordType.A &&
+				                                     r.Name != $"{s.Data.Subdomain}.{s.Data.Domain}") ||
+				                                    r.Type == DnsRecordType.Srv)).ToArray();
 
 			var changedServers = servers.Where(s => !newServers.Contains(s)).Where(server =>
-					srvRecordData.All(r => r!.Target != $"{server.Subdomain}.{server.Domain}" || r.Port != server.Port))
+					srvRecordData.All(r =>
+						r!.Target != $"{server.Data!.Subdomain}.{server!.Data.Domain}" || r.Port != server.Data!.Port))
 				.ToArray();
 
 			var unusedRecords = existingRecords.Where(record =>
-				record.Type == DnsRecordType.A && servers.All(s => record.Name != $"{s.Subdomain}.{s.Domain}") ||
+				record.Type == DnsRecordType.A &&
+				servers.All(s => record.Name != $"{s.Data!.Subdomain}.{s.Data!.Domain}") ||
 				record.Type == DnsRecordType.Srv && servers.All(s =>
 					srvRecordData.First(r => record.Content.Split(" ")[2] == r!.Target)!.Target !=
-					$"{s.Subdomain}.{s.Domain}")).ToArray();
+					$"{s.Data!.Subdomain}.{s.Data!.Domain}")).ToArray();
 
-			await Logging.Log(LogSeverity.Debug, "CF/Monitor", "Adding new servers...");
+			await Logging.LogDebug("CF/Monitor", "Adding new servers...");
 
 			foreach (var server in newServers)
 			{
@@ -129,61 +135,64 @@ public static class CloudflareService
 				await Task.Delay(1);
 			}
 
-			await Logging.Log(LogSeverity.Debug, "CF/Monitor", "Updating existing servers...");
+			await Logging.LogDebug("CF/Monitor", "Updating existing servers...");
 
 			foreach (var server in changedServers)
 			{
 				await UpdateServerRecords(server,
 					existingRecords.First(r =>
-						r.Type == DnsRecordType.A && r.Name == $"{server.Subdomain}.{server.Domain}"),
+						r.Type == DnsRecordType.A && r.Name == $"{server.Data!.Subdomain}.{server.Data!.Domain}"),
 					existingRecords.First(r =>
 						r.Type == DnsRecordType.Srv &&
-						r.Content.Split(" ")[2] == $"{server.Subdomain}.{server.Domain}"));
+						r.Content.Split(" ")[2] == $"{server.Data!.Subdomain}.{server.Data!.Domain}"));
 				await Task.Delay(1);
 			}
 
-			await Logging.Log(LogSeverity.Debug, "CF/Monitor", "Deleting unused records...");
+			await Logging.LogDebug("CF/Monitor", "Deleting unused records...");
 
 			foreach (var record in unusedRecords)
-				await _cloudFlareClient.Zones.DnsRecords.DeleteAsync(_zoneId, record.Id);
+			{
+				//await _cloudFlareClient.Zones.DnsRecords.DeleteAsync(_zoneId, record.Id);	
+			}
 
-			await Logging.Log(LogSeverity.Debug, "CF/Monitor", $"Finished DNS refresh...");
+			await Logging.LogDebug("CF/Monitor", $"Finished DNS refresh...");
 			await Task.Delay(TimeSpan.FromSeconds(30));
 		}
 	}
 
-	private static async Task CreateServerRecords(Server server)
+	private static async Task CreateServerRecords(SingleServerQueryResponse server)
 	{
-		await Logging.Log(LogSeverity.Debug, "CF/DNS", $"Creating A Record for {server.Subdomain}.{server.Domain}");
+		await Logging.LogDebug("CF/DNS", $"Creating A Record for {server.Data!.Subdomain}.{server.Data!.Domain}");
 
 		var aRecord = GenerateARecord(server);
 		var aRecordResult = await _cloudFlareClient!.Zones.DnsRecords.AddAsync(_zoneId, aRecord);
 
-		await Logging.Log(LogSeverity.Debug, "CF/DNS", $"Creating SRV for {server.Subdomain}.{server.Domain}");
+		await Logging.LogDebug("CF/DNS", $"Creating SRV for {server.Data!.Subdomain}.{server.Data!.Domain}");
 
 		var srvRecord = GenerateSRVRecord(server);
 		var content = new StringContent(JsonConvert.SerializeObject(srvRecord), Encoding.UTF8,
 			"application/json");
 		var srvRecordResult = await Api.Post($"https://api.cloudflare.com/client/v4/zones/{_zoneId}/dns_records",
-			content, _cfApiKey);
+			content, _cloudflareApiKey);
 
 		var aRecordSuccess = aRecordResult?.Success == true;
 		if (aRecordResult is null || !aRecordSuccess)
 		{
-			await Logging.Log(LogSeverity.Warning, "CF/Monitor",
-				$"Could not create A Record for: {server.Subdomain}.{server.Domain}");
+			await Logging.LogWarning("CF/Monitor",
+				$"Could not create A Record for: {server.Data!.Subdomain}.{server.Data!.Domain}");
 		}
 
 		if (srvRecordResult is null || !srvRecordResult.IsSuccessStatusCode)
 		{
-			await Logging.Log(LogSeverity.Error, "CF/Monitor",
-				$"Could not create SRV Record for: {server.Subdomain}.{server.Domain}");
+			await Logging.LogError("CF/Monitor",
+				$"Could not create SRV Record for: {server.Data!.Subdomain}.{server.Data!.Domain}");
 		}
 	}
 
-	private static async Task UpdateServerRecords(Server server, DnsRecord aRecord, DnsRecord srvRecord)
+	private static async Task UpdateServerRecords(SingleServerQueryResponse server, DnsRecord aRecord,
+		DnsRecord srvRecord)
 	{
-		await Logging.Log(LogSeverity.Debug, "CF/DNS", $"Updating A Record for {server.Subdomain}.{server.Domain}");
+		await Logging.LogDebug("CF/DNS", $"Updating A Record for {server.Data!.Subdomain}.{server.Data!.Domain}");
 
 		var newARecord = GenerateARecord(server);
 		var modifiedARecord = new ModifiedDnsRecord()
@@ -200,53 +209,76 @@ public static class CloudflareService
 
 		var aRecordResult = await _cloudFlareClient!.Zones.DnsRecords.UpdateAsync(_zoneId, aRecord.Id, modifiedARecord);
 		if (aRecordResult is null || !aRecordResult.Success)
-			await Logging.Log(LogSeverity.Error, "CF/DNS",
-				$"Could not update A Record for: {server.Subdomain}.{server.Domain} ({string.Join(", ", aRecordResult?.Errors.Select(err => err.Code) ?? [])})");
+			await Logging.LogError("CF/DNS",
+				$"Could not update A Record for: {server.Data!.Subdomain}.{server.Data!.Domain} ({string.Join(", ", aRecordResult?.Errors.Select(err => err.Code) ?? [])})");
 
-		await Logging.Log(LogSeverity.Debug, "CF/DNS", $"Creating SRV Record for {server.Subdomain}.{server.Domain}");
+		await Logging.LogDebug("CF/DNS", $"Creating SRV Record for {server.Data!.Subdomain}.{server.Data!.Domain}");
 
 		var newSrvRecord = GenerateSRVRecord(server);
 		var content = new StringContent(JsonConvert.SerializeObject(newSrvRecord), Encoding.UTF8,
 			"application/json");
 		var srvRecordResult = await Api.Put(
 			$"https://api.cloudflare.com/client/v4/zones/{_zoneId}/dns_records/{srvRecord.Id}",
-			content, _cfApiKey);
+			content, _cloudflareApiKey);
 
 		if (srvRecordResult is null || !srvRecordResult.IsSuccessStatusCode)
-			await Logging.Log(LogSeverity.Error, "CF/DNS",
-				$"Could not update SRV Record for: {server.Subdomain}.{server.Domain} ({srvRecordResult?.ReasonPhrase})");
+			await Logging.LogError("CF/DNS",
+				$"Could not update SRV Record for: {server.Data!.Subdomain}.{server.Data!.Domain} ({srvRecordResult?.ReasonPhrase})");
 	}
 
-	private static async Task<Server[]> UpdateServerList()
+	private static async Task<SingleServerQueryResponse[]> UpdateServerList()
 	{
-		await Logging.Log(LogSeverity.Debug, "CF/Monitor", $"Querying '{_panelUrl}/servers' with key '{_mlApiKey}'");
+		await Logging.LogDebug("CF/Monitor", $"Querying '{_panelUrl}/api/application/servers' with key '{_pterodactylClientApiKey}'");
 
-		var response = await Api.Get(_panelUrl + "/servers", _mlApiKey);
+		var response = await Api.Get(_panelUrl + "/api/application/servers", _pterodactylClientApiKey);
 		if (response?.IsSuccessStatusCode ?? false)
 		{
-			var newServerList = await response.Content.ReadFromJsonAsync<Server[]>() ?? [];
-			await Logging.Log(LogSeverity.Debug, "CF/Monitor", $"Found {newServerList.Length} servers");
+			var newServerList = await response.Content.ReadFromJsonAsync<MultiServerQueryResponse>() ??
+			                    new MultiServerQueryResponse();
+			await Logging.LogDebug("CF/Monitor", $"Found {newServerList.Data.Length} servers");
 
-			return newServerList;
+			List<SingleServerQueryResponse> serverData = [];
+			foreach (var server in newServerList.Data)
+			{
+				var serverResponse = await Api.Get(
+					$"{_panelUrl}/api/client/extensions/dnssubdomains/servers/{server.Attributes.Uuid}/dns-config",
+					_pterodactylClientApiKey);
+				if (serverResponse is null || !serverResponse.IsSuccessStatusCode)
+				{
+					await Logging.LogDebug("CF/Monitor", "Could not reach server '{server.Attributes.Uuid}'");
+					continue;
+				}
+
+				var serverInfo = await serverResponse.Content.ReadFromJsonAsync<SingleServerQueryResponse>();
+				if (serverInfo is null || !serverInfo.Success || serverInfo.Data is null)
+				{
+					await Logging.LogDebug("CF/Monitor", "Could not parse server '{server.Attributes.Uuid}'");
+					continue;
+				}
+
+				serverData.Add(serverInfo);
+			}
+
+			return serverData.ToArray();
 		}
 
-		await Logging.Log(LogSeverity.Warning, "CF/Monitor", "Could not reach minimal Pterodactyl API");
-		return [new Server("CANCEL", -1, "CANCEL", "CANCEL")];
+		await Logging.LogWarning("CF/Monitor", "Could not reach minimal Pterodactyl API");
+		return [new SingleServerQueryResponse() { Data = null, }];
 	}
 
 	// ReSharper disable once InconsistentNaming
-	private static dynamic GenerateSRVRecord(Server server)
+	private static dynamic GenerateSRVRecord(SingleServerQueryResponse server)
 	{
 		var srvRecord = new
 		{
 			type = "SRV",
-			name = $"_minecraft._tcp.{server.Subdomain}",
+			name = $"_minecraft._tcp.{server.Data!.Subdomain}",
 			data = new
 			{
 				priority = 0,
 				weight = 5,
-				port = server.Port.ToString(),
-				target = $"{server.Subdomain}.{server.Domain}"
+				port = server.Data!.Port.ToString(),
+				target = $"{server.Data!.Subdomain}.{server.Data!.Domain}"
 			},
 			ttl = 1,
 			proxied = false,
@@ -256,13 +288,13 @@ public static class CloudflareService
 		return srvRecord;
 	}
 
-	private static NewDnsRecord GenerateARecord(Server server)
+	private static NewDnsRecord GenerateARecord(SingleServerQueryResponse server)
 	{
 		var aRecord = new NewDnsRecord()
 		{
 			Type = DnsRecordType.A,
-			Name = server.Subdomain,
-			Content = server.IpAddress,
+			Name = server.Data!.Subdomain,
+			Content = server.Data!.Ip,
 			Ttl = 1,
 			Proxied = false,
 			Comment = "Generated by PTCF"
