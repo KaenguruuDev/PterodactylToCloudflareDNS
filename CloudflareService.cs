@@ -74,7 +74,7 @@ public static class CloudflareService
 		{
 			var result = await _cloudFlareClient.Zones.DnsRecords.AddAsync(_zoneId, dnsRecord);
 			return result is { Success: true } ||
-				   (result.Errors.Count == 1 && result.Errors[0].Code == DnsAlreadyExists);
+			       (result.Errors.Count == 1 && result.Errors[0].Code == DnsAlreadyExists);
 		}
 		catch (Exception e)
 		{
@@ -110,10 +110,10 @@ public static class CloudflareService
 				.Where(r => r != null).ToArray();
 
 			var newServers = servers.Where(s => s.Data != null &&
-												existingRecords.All(r =>
-													(r.Type is DnsRecordType.A &&
-													 r.Name != $"{s.Data.Subdomain}.{s.Data.Domain}") ||
-													r.Type == DnsRecordType.Srv)).ToArray();
+			                                    existingRecords.All(r =>
+				                                    (r.Type is DnsRecordType.A &&
+				                                     r.Name != $"{s.Data.Subdomain}.{s.Data.Domain}") ||
+				                                    r.Type == DnsRecordType.Srv)).ToArray();
 
 			var changedServers = servers.Where(s => !newServers.Contains(s)).Where(server =>
 					srvRecordData.All(r =>
@@ -131,7 +131,15 @@ public static class CloudflareService
 
 			foreach (var server in newServers)
 			{
-				await CreateServerRecords(server);
+				try
+				{
+					await CreateServerRecords(server);
+				}
+				catch (Exception ex)
+				{
+					await Logging.LogError("CF/Monitor", "Error creating server records: " + ex.Message, ex);
+				}
+
 				await Task.Delay(1);
 			}
 
@@ -139,12 +147,21 @@ public static class CloudflareService
 
 			foreach (var server in changedServers)
 			{
-				await UpdateServerRecords(server,
-					existingRecords.First(r =>
-						r.Type == DnsRecordType.A && r.Name == $"{server.Data!.Subdomain}.{server.Data!.Domain}"),
-					existingRecords.First(r =>
-						r.Type == DnsRecordType.Srv &&
-						r.Content.Split(" ")[2] == $"{server.Data!.Subdomain}.{server.Data!.Domain}"));
+				try
+				{
+					var aRecord = existingRecords.First(r =>
+						r.Type == DnsRecordType.A && r.Name == $"{server.Data!.Subdomain}.{server.Data!.Domain}");
+					var srvRecord = existingRecords.First(r =>
+						r.Type == DnsRecordType.Srv && r.Content.Split(" ")[2] ==
+						$"{server.Data!.Subdomain}.{server.Data!.Domain}");
+
+					await UpdateServerRecords(server, aRecord, srvRecord);
+				}
+				catch (Exception ex)
+				{
+					await Logging.LogError("CF/Monitor", "Error updating server records: " + ex.Message, ex);
+				}
+
 				await Task.Delay(1);
 			}
 
@@ -155,51 +172,18 @@ public static class CloudflareService
 
 			foreach (var aRecord in aRecordsToDelete)
 			{
-				// Find corresponding SRV record
-				var srvRecord = unusedRecords.FirstOrDefault(r =>
-					r.Type == DnsRecordType.Srv &&
-					r.Content.Split(" ")[2] == aRecord.Name);
-
-				// Delete A record
-				var aResult = await _cloudFlareClient.Zones.DnsRecords.DeleteAsync(_zoneId, aRecord.Id);
-
-				// Delete SRV record if it exists
-				if (srvRecord != null)
+				try
 				{
-					await _cloudFlareClient.Zones.DnsRecords.DeleteAsync(_zoneId, srvRecord.Id);
+					await DeleteServerRecords(aRecord, unusedRecords);
 				}
-
-				if (aResult?.Success == true)
+				catch (Exception ex)
 				{
-					await Logging.LogDebug("CF/Monitor", $"Deleted DNS records for: {aRecord.Name}");
-
-					// Parse SRV record data if available
-					if (srvRecord != null)
-					{
-						var srvData = JsonConvert.DeserializeObject<SrvRecordData>(JsonConvert.SerializeObject(srvRecord.Data));
-						await EmailProvider.SendEmail($"Records Deleted for {aRecord.Name}",
-							EmailTemplates.DnsRecordsDeleted(aRecord.Name, aRecord.Content,
-								srvRecord.Name, srvData?.Priority ?? 0, srvData?.Weight ?? 0,
-								srvData?.Port ?? 0, srvData?.Target ?? ""));
-					}
-					else
-					{
-						await EmailProvider.SendEmail($"Records Deleted for {aRecord.Name}",
-							EmailTemplates.DnsRecordsDeleted(aRecord.Name, aRecord.Content,
-								"N/A", 0, 0, 0, "N/A"));
-					}
-				}
-				else
-				{
-					await Logging.LogError("CF/Monitor", $"Failed to delete DNS record: {aRecord.Name}");
-					await EmailProvider.SendEmail($"Record Deletion Failed for {aRecord.Name}",
-						EmailTemplates.DnsRecordDeletionFailed(aRecord.Name, aRecord.Type.ToString(),
-							aResult?.Errors.Count > 0 ? aResult.Errors[0].Message : "Unknown Error"));
-
-					await Logging.LogDebug("CF/Monitor", $"Finished DNS refresh...");
-					await Task.Delay(TimeSpan.FromSeconds(30));
+					await Logging.LogError("CF/Monitor", "Error deleting server records: " + ex.Message, ex);
 				}
 			}
+
+			await Logging.LogDebug("CF/Monitor", $"Finished DNS refresh...");
+			await Task.Delay(TimeSpan.FromSeconds(30));
 		}
 	}
 
@@ -241,11 +225,20 @@ public static class CloudflareService
 			return;
 		}
 
-		var srvData = JsonConvert.DeserializeObject<dynamic>(srvRecord);
+		var responseContent = await srvRecordResult.Content.ReadAsStringAsync();
+		var srvData = JsonConvert.DeserializeObject<dynamic>(responseContent);
+		if (srvData is null)
+			return;
+
+		var srvRecordName = (string)srvData.result.name;
+		var srvPriority = (int)srvData.result.data.priority;
+		var srvWeight = (int)srvData.result.data.weight;
+		var srvPort = (int)srvData.result.data.port;
+		var srvTarget = (string)srvData.result.data.target;
+
 		await EmailProvider.SendEmail($"Records Created for {server.Data!.FullDomain}",
-			EmailTemplates.NewDnsRecordsCreated(server.Data!.FullDomain, aRecord.Content,
-				(string)srvData.name, (int)srvData.data.priority, (int)srvData.data.weight,
-				int.Parse((string)srvData.data.port), (string)srvData.data.target));
+			EmailTemplates.NewDnsRecordsCreated(server.Data!.FullDomain, aRecord.Content, srvRecordName, srvPriority,
+				srvWeight, srvPort, srvTarget));
 	}
 
 	private static async Task UpdateServerRecords(SingleServerQueryResponse server, DnsRecord aRecord,
@@ -304,6 +297,46 @@ public static class CloudflareService
 				int.Parse((string)srvData.data.port), (string)srvData.data.target));
 	}
 
+	private static async Task DeleteServerRecords(DnsRecord aRecord, DnsRecord[] unusedRecords)
+	{
+		var srvRecord = unusedRecords.FirstOrDefault(r =>
+			r.Type == DnsRecordType.Srv &&
+			r.Content.Split(" ")[2] == aRecord.Name);
+
+		var aResult = await _cloudFlareClient!.Zones.DnsRecords.DeleteAsync(_zoneId, aRecord.Id);
+
+		if (srvRecord != null)
+			await _cloudFlareClient.Zones.DnsRecords.DeleteAsync(_zoneId, srvRecord.Id);
+
+		if (aResult?.Success == true)
+		{
+			await Logging.LogDebug("CF/Monitor", $"Deleted DNS records for: {aRecord.Name}");
+
+			if (srvRecord != null)
+			{
+				var srvData =
+					JsonConvert.DeserializeObject<SrvRecordData>(JsonConvert.SerializeObject(srvRecord.Data));
+				await EmailProvider.SendEmail($"Records Deleted for {aRecord.Name}",
+					EmailTemplates.DnsRecordsDeleted(aRecord.Name, aRecord.Content,
+						srvRecord.Name, srvData?.Priority ?? 0, srvData?.Weight ?? 0,
+						srvData?.Port ?? 0, srvData?.Target ?? ""));
+			}
+			else
+			{
+				await EmailProvider.SendEmail($"Records Deleted for {aRecord.Name}",
+					EmailTemplates.DnsRecordsDeleted(aRecord.Name, aRecord.Content,
+						"N/A", 0, 0, 0, "N/A"));
+			}
+		}
+		else
+		{
+			await Logging.LogError("CF/Monitor", $"Failed to delete DNS record: {aRecord.Name}");
+			await EmailProvider.SendEmail($"Record Deletion Failed for {aRecord.Name}",
+				EmailTemplates.DnsRecordDeletionFailed(aRecord.Name, aRecord.Type.ToString(),
+					aResult?.Errors.Count > 0 ? aResult.Errors[0].Message : "Unknown Error"));
+		}
+	}
+
 	private static async Task<SingleServerQueryResponse[]> UpdateServerList()
 	{
 		await Logging.LogDebug("CF/Monitor",
@@ -313,7 +346,7 @@ public static class CloudflareService
 		if (response?.IsSuccessStatusCode ?? false)
 		{
 			var newServerList = await response.Content.ReadFromJsonAsync<MultiServerQueryResponse>() ??
-								new MultiServerQueryResponse();
+			                    new MultiServerQueryResponse();
 			await Logging.LogDebug("CF/Monitor", $"Found {newServerList.Data.Length} servers");
 
 			List<SingleServerQueryResponse> serverData = [];
@@ -322,17 +355,21 @@ public static class CloudflareService
 				var serverResponse = await Api.Get(
 					$"{_panelUrl}/api/client/extensions/dnssubdomains/servers/{server.Attributes.Identifier}/dns-config",
 					_pterodactylClientApiKey);
-				if (serverResponse is null || !serverResponse.IsSuccessStatusCode)
+
+				var serverInfo =
+					JsonConvert.DeserializeObject<SingleServerQueryResponse>(
+						await (serverResponse?.Content.ReadAsStringAsync() ?? Task.FromResult("")));
+
+				if (serverResponse is null || !serverResponse.IsSuccessStatusCode && serverInfo is null)
 				{
 					await Logging.LogDebug("CF/Monitor",
 						$"Could not reach server '{server.Attributes.Uuid}': {serverResponse?.RequestMessage}");
 					continue;
 				}
 
-				var serverInfo = await serverResponse.Content.ReadFromJsonAsync<SingleServerQueryResponse>();
 				if (serverInfo is null || !serverInfo.Success || serverInfo.Data is null)
 				{
-					await Logging.LogDebug("CF/Monitor", "Could not parse server '{server.Attributes.Uuid}'");
+					await Logging.LogDebug("CF/Monitor", $"Could not parse server '{server.Attributes.Uuid}'");
 					continue;
 				}
 
