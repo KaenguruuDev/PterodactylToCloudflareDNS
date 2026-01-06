@@ -59,6 +59,9 @@ public static class Logging
 				await writer.WriteLineAsync($"---- BEGIN TRACE ----\n{exception}\n---- END   TRACE ----");
 		}
 
+		if (severity == LogSeverity.Debug && !Program.IsDebug)
+			return;
+		
 		Console.ForegroundColor = severity switch
 		{
 			LogSeverity.Debug => ConsoleColor.Green,
