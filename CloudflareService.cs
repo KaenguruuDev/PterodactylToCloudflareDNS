@@ -174,7 +174,7 @@ public static class CloudflareService
 			{
 				try
 				{
-					await DeleteServerRecords(aRecord, unusedRecords);
+					await DeleteServerRecords(aRecord, unusedRecords, servers);
 				}
 				catch (Exception ex)
 				{
@@ -297,11 +297,21 @@ public static class CloudflareService
 				int.Parse((string)srvData.data.port), (string)srvData.data.target));
 	}
 
-	private static async Task DeleteServerRecords(DnsRecord aRecord, DnsRecord[] unusedRecords)
+	private static async Task DeleteServerRecords(DnsRecord aRecord, DnsRecord[] unusedRecords, SingleServerQueryResponse[] servers)
 	{
 		var srvRecord = unusedRecords.FirstOrDefault(r =>
 			r.Type == DnsRecordType.Srv &&
 			r.Content.Split(" ")[2] == aRecord.Name);
+
+		// Determine the deletion reason
+		var matchingServer = servers.FirstOrDefault(s => s.Data != null && $"{s.Data.Subdomain}.{s.Data.Domain}" == aRecord.Name);
+		string deletionReason;
+
+		if (matchingServer?.Data != null && !matchingServer.Data.Enabled)
+			deletionReason = "Server DNS management disabled";
+		else
+			deletionReason = "Server no longer exists";
+
 
 		var aResult = await _cloudFlareClient!.Zones.DnsRecords.DeleteAsync(_zoneId, aRecord.Id);
 
@@ -319,13 +329,13 @@ public static class CloudflareService
 				await EmailProvider.SendEmail($"Records Deleted for {aRecord.Name}",
 					EmailTemplates.DnsRecordsDeleted(aRecord.Name, aRecord.Content,
 						srvRecord.Name, srvData?.Priority ?? 0, srvData?.Weight ?? 0,
-						srvData?.Port ?? 0, srvData?.Target ?? ""));
+						srvData?.Port ?? 0, srvData?.Target ?? "", deletionReason));
 			}
 			else
 			{
 				await EmailProvider.SendEmail($"Records Deleted for {aRecord.Name}",
 					EmailTemplates.DnsRecordsDeleted(aRecord.Name, aRecord.Content,
-						"N/A", 0, 0, 0, "N/A"));
+						"N/A", 0, 0, 0, "N/A", deletionReason));
 			}
 		}
 		else
