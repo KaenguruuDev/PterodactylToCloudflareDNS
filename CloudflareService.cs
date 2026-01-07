@@ -74,7 +74,7 @@ public static class CloudflareService
 		{
 			var result = await _cloudFlareClient.Zones.DnsRecords.AddAsync(_zoneId, dnsRecord);
 			return result is { Success: true } ||
-			       (result.Errors.Count == 1 && result.Errors[0].Code == DnsAlreadyExists);
+				   (result.Errors.Count == 1 && result.Errors[0].Code == DnsAlreadyExists);
 		}
 		catch (Exception e)
 		{
@@ -109,23 +109,23 @@ public static class CloudflareService
 				.Select(r => JsonConvert.DeserializeObject<SrvRecordData>(JsonConvert.SerializeObject(r.Data)))
 				.Where(r => r != null).ToArray();
 
-			var newServers = servers.Where(s => s.Data != null &&
-			                                    existingRecords.All(r =>
-				                                    (r.Type is DnsRecordType.A &&
-				                                     r.Name != $"{s.Data.Subdomain}.{s.Data.Domain}") ||
-				                                    r.Type == DnsRecordType.Srv)).ToArray();
+			var newServers = servers.Where(s => s.Data != null && s.Data.Enabled &&
+												existingRecords.All(r =>
+													(r.Type is DnsRecordType.A &&
+													 r.Name != $"{s.Data.Subdomain}.{s.Data.Domain}") ||
+													r.Type == DnsRecordType.Srv)).ToArray();
 
-			var changedServers = servers.Where(s => !newServers.Contains(s)).Where(server =>
+			var changedServers = servers.Where(s => !newServers.Contains(s) && s.Data != null && s.Data.Enabled).Where(server =>
 					srvRecordData.All(r =>
 						r!.Target != $"{server.Data!.Subdomain}.{server!.Data.Domain}" || r.Port != server.Data!.Port))
 				.ToArray();
 
 			var unusedRecords = existingRecords.Where(record =>
 				record.Type == DnsRecordType.A &&
-				servers.All(s => record.Name != $"{s.Data!.Subdomain}.{s.Data!.Domain}") ||
+				servers.All(s => record.Name != $"{s.Data!.Subdomain}.{s.Data!.Domain}" || !s.Data!.Enabled) ||
 				record.Type == DnsRecordType.Srv && servers.All(s =>
 					srvRecordData.First(r => record.Content.Split(" ")[2] == r!.Target)!.Target !=
-					$"{s.Data!.Subdomain}.{s.Data!.Domain}")).ToArray();
+					$"{s.Data!.Subdomain}.{s.Data!.Domain}" || !s.Data!.Enabled)).ToArray();
 
 			await Logging.LogDebug("CF/Monitor", "Adding new servers...");
 
@@ -346,7 +346,7 @@ public static class CloudflareService
 		if (response?.IsSuccessStatusCode ?? false)
 		{
 			var newServerList = await response.Content.ReadFromJsonAsync<MultiServerQueryResponse>() ??
-			                    new MultiServerQueryResponse();
+								new MultiServerQueryResponse();
 			await Logging.LogDebug("CF/Monitor", $"Found {newServerList.Data.Length} servers");
 
 			List<SingleServerQueryResponse> serverData = [];
