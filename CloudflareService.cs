@@ -95,7 +95,7 @@ public static class CloudflareService
 			if (servers is [{ Data: null }])
 			{
 				await Logging.LogDebug("CF/Monitor", "Refresh process cancelled. Continuing...");
-				await Task.Delay(TimeSpan.FromSeconds(30));
+				await Task.Delay(TimeSpan.FromMinutes(1));
 				continue;
 			}
 
@@ -183,7 +183,7 @@ public static class CloudflareService
 			}
 
 			await Logging.LogDebug("CF/Monitor", $"Finished DNS refresh...");
-			await Task.Delay(TimeSpan.FromSeconds(30));
+			await Task.Delay(TimeSpan.FromMinutes(1));
 		}
 	}
 
